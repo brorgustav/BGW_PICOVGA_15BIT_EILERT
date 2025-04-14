@@ -1,0 +1,2 @@
+# BGW_PICOVGA_15BIT_EILERT
+ VGA on rpi pico but 15bit (VGA DEMO BASE BOARD)
