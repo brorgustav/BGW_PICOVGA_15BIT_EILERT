@@ -57,10 +57,11 @@ const int QVGALastLine = 240;  //La cantidad de lineas de los gráficos. Se usa 
 // a pointer to the ADDRESS of this color array.
 // Note that this array is automatically initialized to all 0's (black)
 //extern uint16_t vga_data_array[TXCOUNT];
-uint16_t vga_data_array[TXCOUNT];
-uint16_t vga_data_array_next[TXCOUNT];
+unsigned char vga_data_array[TXCOUNT];
+volatile unsigned char* address_pointer_array = &vga_data_array[0];
+unsigned char vga_data_array_next[TXCOUNT];
 // address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
-volatile uint16_t* address_pointer_array[TXCOUNT];
+//volatile uint16_t* address_pointer_array[TXCOUNT];
 //extern uint16_t vga_data_array_next[TXCOUNT];
 
 // uint16_t vga_data_array_next[TXCOUNT];
@@ -115,7 +116,7 @@ volatile uint16_t* address_pointer_array[TXCOUNT];
 // For drawing uint16_tacters
 unsigned short cursor_y, cursor_x, textsize;
 uint16_t textcolor, textbgcolor, wrap;
-uint16_t testcolor=0;
+uint16_t testcolor = 0;
 
 uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
   // Convert from 8-bit (0–255) to 5-bit (0–31)
@@ -134,8 +135,8 @@ uint32_t SaveDividerState;       // saved integer divider state
 volatile uint32_t currentFrame;  // frame counter
 
 volatile int currentScanLine;  // current processed scan line 0... (next displayed scan line)
-void startDMAForLine(uint16_t line) {
-  volatile uint16_t* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
+void startDMAForLine(unsigned char line) {
+  volatile unsigned char* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
   dma_channel_set_read_addr(dma_chan, line_ptr, true);
 }
 
@@ -265,11 +266,11 @@ void initVGA() {
 void fillScreen(uint16_t color) {
   for (int i = 0; i < TXCOUNT; i++) {
     vga_data_array[i] = color;
-        vga_data_array_next[i] = color;
+    vga_data_array_next[i] = color;
     //drawPixel(i, 0, color);
   }
   for (int i = 0; i < TXCOUNT; i++) {
-        vga_data_array[i] = color;
+    vga_data_array[i] = color;
     vga_data_array_next[i] = color;
     //drawPixel(0, i, color);
   }
@@ -295,21 +296,21 @@ void drawPixel(int x, int y, uint16_t color) {
 }
 
 void clearScreen() {
-  // for (int i = 0; i < TXCOUNT; i++) {
-  //   vga_data_array_next[i] = 0;
-  // }
+  for (int i = 0; i < TXCOUNT; i++) {
+    vga_data_array_next[i] = 0;
+  }
 }
 
 void nextFrame() {
-  // for (uint16_t i = 0; i < TXCOUNT; i++) {
-  //   vga_data_array[i] = vga_data_array_next[i];
-  // }
+  for (uint16_t i = 0; i < TXCOUNT; i++) {
+    vga_data_array[i] = vga_data_array_next[i];
+  }
 }
 
 //TIMER
 const byte frameRate = 20;
 const unsigned long FRAME_INTERVAL = 10000 / frameRate;  // Intervalo de tiempo para cada frame
-unsigned long previousFrameTime = 0;                    // Tiempo previo para el inicio de cada ciclo
+unsigned long previousFrameTime = 0;                     // Tiempo previo para el inicio de cada ciclo
 unsigned long currentTime;
 
 void setup() {
@@ -336,7 +337,7 @@ void loop() {
     draw();
   }
 }
- bool programa=0;
+bool programa = 0;
 void draw() {
   //CODE HERE RUNS AT FRAMERATE
   if (currentTime % 5000 <= 50) {
@@ -347,17 +348,15 @@ void draw() {
     testcolor = createColor(0, 0, 255);
     debug.println("BLUE");
     //  tunnel();           //example
-  } 
-  else if (programa == 0)
-  {
-    testcolor = createColor(255, 0, 0);
-            debug.println("RED");
+  } else if (programa == 0) {
+    testcolor = createColor(0, 255, 0);
+    debug.println("GREEN");
     //    uint16_t green = createColor(0, 255, 0);
     //   asciiHorizontal();
     //example
   }
   //  escribir();         //example
-      fillScreen(testcolor);
+  fillScreen(testcolor);
   nextFrame();    //copies temporary buffer to the vga output buffer
   clearScreen();  //deletes temporary buffer, then next frame will be black
 }
