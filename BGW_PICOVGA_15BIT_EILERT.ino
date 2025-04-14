@@ -23,11 +23,19 @@
   https://vanhunteradams.com/Pico/VGA/VGA.html
 */
 
+#include <Arduino.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
+#define H_ACTIVE 655      // (active + frontporch - 1) - one cycle delay for mov
+#define V_ACTIVE 479      // (active - 1)
+#define rgb15_ACTIVE 319  // (horizontal active)/2 - 1
+// Ensure the same resolution definitions as in vga_graphics.h.
+#define SCREEN_WIDTH 640
+#define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
+#define debug Serial
 // Our assembled programs:
 // Each gets the name <pio_filename.pio.h>
 #include "hsync.pio.h"
@@ -37,15 +45,9 @@
 #include "vga_graphics.h"
 // Font file
 #include "glcdfont.h"
-#include <Arduino.h>
+
 // VGA timing constants
-#define H_ACTIVE 655      // (active + frontporch - 1) - one cycle delay for mov
-#define V_ACTIVE 479      // (active - 1)
-#define rgb15_ACTIVE 319  // (horizontal active)/2 - 1
-// Ensure the same resolution definitions as in vga_graphics.h.
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
-#define debug Serial
+
 
 // Length of the pixel array, and number of DMA transfers
 const unsigned int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
@@ -126,9 +128,33 @@ uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
   uint16_t blue = (b >> 3) & 0x1F;
   // Pack: red in bits 14-10, green in bits 9-5, blue in bits 4-0.
   //return (red << 10) | (green << 5) | blue;
-      return (red) | (green << 5) | (blue << 10);
+  return (red) | (green << 5) | (blue << 10);
 }
 
+uint16_t mapColor(uint16_t color) {
+  // Extract logical channels.
+  uint8_t red   = color & 0x1F;
+  uint8_t green = (color >> 5) & 0x1F;
+  uint8_t blue  = (color >> 10) & 0x1F;
+  
+  uint16_t out = 0;
+  // Map red (logical red in bits 0–4) to physical GPIO0–4.
+  for (int i = 0; i < 5; i++) {
+    if (red & (1 << i))
+      out |= (1 << i);  // Red goes to GPIO0-4 (bits 0-4)
+  }
+  // Map green to physical GPIO6–10.
+  for (int i = 0; i < 5; i++) {
+    if (green & (1 << i))
+      out |= (1 << (6 + i));
+  }
+  // Map blue to physical GPIO11–15.
+  for (int i = 0; i < 5; i++) {
+    if (blue & (1 << i))
+      out |= (1 << (11 + i));
+  }
+  return out;
+}
 // DMA channels - 0 sends color data, 1 reconfigures and restarts 0
 uint16_t dma_chan = dma_claim_unused_channel(true);
 uint16_t dma_cb = dma_claim_unused_channel(true);
@@ -201,7 +227,7 @@ void initVGA() {
 
   // Channel Zero (sends color data to PIO VGA machine)
   dma_channel_config c0 = dma_channel_get_default_config(dma_chan);  // default configs
-  channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);            // 8-bit txfers.  
+  channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);           // 8-bit txfers.
   channel_config_set_read_increment(&c0, true);                      // yes read incrementing
   channel_config_set_write_increment(&c0, false);                    // no write incrementing
   channel_config_set_dreq(&c0, DREQ_PIO0_TX2);                       // DREQ_PIO0_TX2 pacing (FIFO)
@@ -267,13 +293,13 @@ void initVGA() {
 
 void fillScreen(uint16_t color) {
   for (int i = 0; i < TXCOUNT; i++) {
-  //  vga_data_array[i] = color;
+    //  vga_data_array[i] = color;
     vga_data_array_next[i] = color;
     //drawPixel(i, 0, color);
   }
   for (int i = 0; i < TXCOUNT; i++) {
-   
-  // vga_data_array[i] = color;
+
+    // vga_data_array[i] = color;
     vga_data_array_next[i] = color;
     //drawPixel(0, i, color);
   }
@@ -348,14 +374,15 @@ void draw() {
   }
 
   if (programa == 1) {
-      clearScreen();
+    clearScreen();
     testcolor = createColor(0, 0, 255);
+        testcolor = mapColor(testcolor);
     debug.println("BLUE");
     //  tunnel();           //example
   } else if (programa == 0) {
-      clearScreen();
+    clearScreen();
     testcolor = createColor(0, 255, 0);
-    
+    testcolor = mapColor(testcolor);
     debug.println("GREEN");
     //    uint16_t green = createColor(0, 255, 0);
     //   asciiHorizontal();

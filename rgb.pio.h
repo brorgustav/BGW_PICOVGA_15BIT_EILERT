@@ -89,7 +89,10 @@ static inline void rgb15_program_init(PIO pio, uint sm, uint offset, uint pin) {
   pio_gpio_init(pio, pin + 14);
   //  pio_gpio_init(pio, pin + 15);
     // Set the pin direction to output at the PIO (3 pins)
-    pio_sm_set_consecutive_pindirs(pio, sm, pin, 15, true);
+   char print=pio_sm_set_consecutive_pindirs(pio, sm, pin, 15, true);
+      debug.println("pio_sm_set_consecutive_pindirs: ");debug.println(print);
+      pio_sm_set_consecutive_pindirs(pio, sm, pin, 15, true);
+    
     // Load our configuration, and jump to the start of the program
     pio_sm_init(pio, sm, offset, &c);
     // Set the state machine running (commented out, I'll start this in the C)
