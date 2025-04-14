@@ -45,6 +45,7 @@
 // Ensure the same resolution definitions as in vga_graphics.h.
 #define SCREEN_WIDTH 640
 #define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
+#define debug Serial
 
 // Length of the pixel array, and number of DMA transfers
 const unsigned int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
@@ -262,13 +263,15 @@ void initVGA() {
 
 
 void fillScreen(uint16_t color) {
-  for (int i = 0; i < SCREEN_WIDTH; i++) {
-    //vga_data_array_next[i] = color;
-    drawPixel(i, 0, color);
+  for (int i = 0; i < TXCOUNT; i++) {
+    vga_data_array[i] = color;
+        vga_data_array_next[i] = color;
+    //drawPixel(i, 0, color);
   }
-  for (int i = 0; i < SCREEN_HEIGHT; i++) {
-    //vga_data_array_next[i] = color;
-    drawPixel(0, i, color);
+  for (int i = 0; i < TXCOUNT; i++) {
+        vga_data_array[i] = color;
+    vga_data_array_next[i] = color;
+    //drawPixel(0, i, color);
   }
 }
 // A function for drawing a pixel with a specified color.
@@ -277,7 +280,7 @@ void fillScreen(uint16_t color) {
 // pixels will be automatically updated on the screen.
 void drawPixel(int x, int y, uint16_t color) {
   if (x < 0 || x >= SCREEN_WIDTH || y < 0 || y >= SCREEN_HEIGHT) return;
-  vga_data_array[y * SCREEN_WIDTH + x] = color;
+  vga_data_array_next[y * SCREEN_WIDTH + x] = color;
   // Which pixel is it?
   uint16_t pixel = ((SCREEN_WIDTH * y) + x);
 
@@ -292,20 +295,20 @@ void drawPixel(int x, int y, uint16_t color) {
 }
 
 void clearScreen() {
-  for (int i = 0; i < TXCOUNT; i++) {
-    vga_data_array_next[i] = 0;
-  }
+  // for (int i = 0; i < TXCOUNT; i++) {
+  //   vga_data_array_next[i] = 0;
+  // }
 }
 
 void nextFrame() {
-  for (uint16_t i = 0; i < TXCOUNT; i++) {
-    vga_data_array[i] = vga_data_array_next[i];
-  }
+  // for (uint16_t i = 0; i < TXCOUNT; i++) {
+  //   vga_data_array[i] = vga_data_array_next[i];
+  // }
 }
 
 //TIMER
 const byte frameRate = 20;
-const unsigned long FRAME_INTERVAL = 1000 / frameRate;  // Intervalo de tiempo para cada frame
+const unsigned long FRAME_INTERVAL = 10000 / frameRate;  // Intervalo de tiempo para cada frame
 unsigned long previousFrameTime = 0;                    // Tiempo previo para el inicio de cada ciclo
 unsigned long currentTime;
 
@@ -333,26 +336,28 @@ void loop() {
     draw();
   }
 }
-
+ bool programa=0;
 void draw() {
   //CODE HERE RUNS AT FRAMERATE
-  static bool programa;
   if (currentTime % 5000 <= 50) {
     programa = !programa;  //changes the example program
   }
 
   if (programa == 1) {
     testcolor = createColor(0, 0, 255);
-    fillScreen(testcolor);
+    debug.println("BLUE");
     //  tunnel();           //example
-  } else {
+  } 
+  else if (programa == 0)
+  {
     testcolor = createColor(255, 0, 0);
-        fillScreen(testcolor);
+            debug.println("RED");
     //    uint16_t green = createColor(0, 255, 0);
     //   asciiHorizontal();
     //example
   }
   //  escribir();         //example
+      fillScreen(testcolor);
   nextFrame();    //copies temporary buffer to the vga output buffer
   clearScreen();  //deletes temporary buffer, then next frame will be black
 }
