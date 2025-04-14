@@ -118,13 +118,15 @@ unsigned short cursor_y, cursor_x, textsize;
 uint16_t textcolor, textbgcolor, wrap;
 uint16_t testcolor = 0;
 
+
 uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
   // Convert from 8-bit (0–255) to 5-bit (0–31)
   uint16_t red = (r >> 3) & 0x1F;
   uint16_t green = (g >> 3) & 0x1F;
   uint16_t blue = (b >> 3) & 0x1F;
   // Pack: red in bits 14-10, green in bits 9-5, blue in bits 4-0.
-  return (red << 10) | (green << 5) | blue;
+  //return (red << 10) | (green << 5) | blue;
+      return (red) | (green << 5) | (blue << 10);
 }
 
 // DMA channels - 0 sends color data, 1 reconfigures and restarts 0
@@ -199,7 +201,7 @@ void initVGA() {
 
   // Channel Zero (sends color data to PIO VGA machine)
   dma_channel_config c0 = dma_channel_get_default_config(dma_chan);  // default configs
-  channel_config_set_transfer_data_size(&c0, DMA_SIZE_8);            // 8-bit txfers
+  channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);            // 8-bit txfers.  
   channel_config_set_read_increment(&c0, true);                      // yes read incrementing
   channel_config_set_write_increment(&c0, false);                    // no write incrementing
   channel_config_set_dreq(&c0, DREQ_PIO0_TX2);                       // DREQ_PIO0_TX2 pacing (FIFO)
@@ -265,12 +267,13 @@ void initVGA() {
 
 void fillScreen(uint16_t color) {
   for (int i = 0; i < TXCOUNT; i++) {
-    vga_data_array[i] = color;
+  //  vga_data_array[i] = color;
     vga_data_array_next[i] = color;
     //drawPixel(i, 0, color);
   }
   for (int i = 0; i < TXCOUNT; i++) {
-    vga_data_array[i] = color;
+   
+  // vga_data_array[i] = color;
     vga_data_array_next[i] = color;
     //drawPixel(0, i, color);
   }
@@ -345,11 +348,14 @@ void draw() {
   }
 
   if (programa == 1) {
+      clearScreen();
     testcolor = createColor(0, 0, 255);
     debug.println("BLUE");
     //  tunnel();           //example
   } else if (programa == 0) {
+      clearScreen();
     testcolor = createColor(0, 255, 0);
+    
     debug.println("GREEN");
     //    uint16_t green = createColor(0, 255, 0);
     //   asciiHorizontal();
