@@ -17,22 +17,7 @@
 #define rgb_wrap 8
 
 
-static const uint16_t rgb_program_instructions[] = {   //pins: 15
-    0x80a0, //  0: pull   block                      
-    0xa047, //  1: mov    y, osr                     
-            //     .wrap_target
-    0xe000, //  2: set    pins, 0                    
-    0xa022, //  3: mov    x, y                       
-    0x23c1, //  4: wait   1 irq, 1               [3] 
-    0x80a0, //  5: pull   block                      
-    0x640f, //  6: out    pins, 15               [4] 
-    0x620f, //  7: out    pins, 15               [2] 
-    0x0045, //  8: jmp    x--, 5                     
-            //     .wrap
-};
-
-
-// static const uint16_t rgb_program_instructions[] = {
+// static const uint16_t rgb_program_instructions[] = {   //pins: 15
 //     0x80a0, //  0: pull   block                      
 //     0xa047, //  1: mov    y, osr                     
 //             //     .wrap_target
@@ -40,11 +25,26 @@ static const uint16_t rgb_program_instructions[] = {   //pins: 15
 //     0xa022, //  3: mov    x, y                       
 //     0x23c1, //  4: wait   1 irq, 1               [3] 
 //     0x80a0, //  5: pull   block                      
-//     0x6410, //  6: out    pins, 16               [4] 
-//     0x6210, //  7: out    pins, 16               [2] 
+//     0x640f, //  6: out    pins, 15               [4] 
+//     0x620f, //  7: out    pins, 15               [2] 
 //     0x0045, //  8: jmp    x--, 5                     
 //             //     .wrap
 // };
+
+
+static const uint16_t rgb_program_instructions[] = {
+    0x80a0, //  0: pull   block                      
+    0xa047, //  1: mov    y, osr                     
+            //     .wrap_target
+    0xe000, //  2: set    pins, 0                    
+    0xa022, //  3: mov    x, y                       
+    0x23c1, //  4: wait   1 irq, 1               [3] 
+    0x80a0, //  5: pull   block                      
+    0x6410, //  6: out    pins, 16               [4] 
+    0x6210, //  7: out    pins, 16               [2] 
+    0x0045, //  8: jmp    x--, 5                     
+            //     .wrap
+};
 
 #if !PICO_NO_HARDWARE
 static const struct pio_program rgb15_program = {
@@ -67,8 +67,8 @@ static inline void rgb15_program_init(PIO pio, uint sm, uint offset, uint pin) {
   pio_sm_config c = rgb15_program_get_default_config(offset);
   // Map the state machine's SET and OUT pin group to three pins, the `pin`
   // parameter to this function is the lowest one. These groups overlap.
-  sm_config_set_set_pins(&c, pin, 15);
-  sm_config_set_out_pins(&c, pin, 15);
+  sm_config_set_set_pins(&c, pin, 16);
+  sm_config_set_out_pins(&c, pin, 16);
   // Set clock division (Commented out, this one runs at full speed)
   // sm_config_set_clkdiv(&c, 5) ;
   // Set this pin's GPIO function (connect PIO to the pad)
@@ -87,11 +87,9 @@ static inline void rgb15_program_init(PIO pio, uint sm, uint offset, uint pin) {
   pio_gpio_init(pio, pin + 12);
   pio_gpio_init(pio, pin + 13);
   pio_gpio_init(pio, pin + 14);
-  //  pio_gpio_init(pio, pin + 15);
+ pio_gpio_init(pio, pin + 15);
     // Set the pin direction to output at the PIO (3 pins)
-   char print=pio_sm_set_consecutive_pindirs(pio, sm, pin, 15, true);
-      debug.println("pio_sm_set_consecutive_pindirs: ");debug.println(print);
-      pio_sm_set_consecutive_pindirs(pio, sm, pin, 15, true);
+      pio_sm_set_consecutive_pindirs(pio, sm, pin, 16, true);
     
     // Load our configuration, and jump to the start of the program
     pio_sm_init(pio, sm, offset, &c);

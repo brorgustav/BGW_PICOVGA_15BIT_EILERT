@@ -33,8 +33,10 @@
 #define V_ACTIVE 479      // (active - 1)
 #define rgb15_ACTIVE 319  // (horizontal active)/2 - 1
 // Ensure the same resolution definitions as in vga_graphics.h.
-#define SCREEN_WIDTH 640
-#define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
+// #define SCREEN_WIDTH 640
+// #define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
+const uint16_t SCREEN_WIDTH = 640;
+const uint16_t SCREEN_HEIGHT = 240;  // Logical height (output is doubled to 480)
 #define debug Serial
 // Our assembled programs:
 // Each gets the name <pio_filename.pio.h>
@@ -50,18 +52,18 @@
 
 
 // Length of the pixel array, and number of DMA transfers
-const unsigned int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
-const uint16_t TXCOUNT = pixels / 2;  // Total pixels / 2. The total size of the buffer
-const uint16_t DMATXCOUNT = SCREEN_WIDTH / 2;
+const int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
+const int TXCOUNT = pixels / 2;  // Total pixels / 2. The total size of the buffer
+const int DMATXCOUNT = SCREEN_WIDTH / 2;
 const int QVGALastLine = 240;  //La cantidad de lineas de los gráficos. Se usa para pasar la info al PIO (si se cambia se mueve la imagen)
 
 // Pixel color array that is DMA's to the PIO machines and
 // a pointer to the ADDRESS of this color array.
 // Note that this array is automatically initialized to all 0's (black)
 //extern uint16_t vga_data_array[TXCOUNT];
-unsigned char vga_data_array[TXCOUNT];
-volatile unsigned char* address_pointer_array = &vga_data_array[0];
-unsigned char vga_data_array_next[TXCOUNT];
+uint16_t vga_data_array[TXCOUNT];
+volatile uint16_t* address_pointer_array = &vga_data_array[0];
+uint16_t vga_data_array_next[TXCOUNT];
 // address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
 //volatile uint16_t* address_pointer_array[TXCOUNT];
 //extern uint16_t vga_data_array_next[TXCOUNT];
@@ -121,22 +123,33 @@ uint16_t textcolor, textbgcolor, wrap;
 uint16_t testcolor = 0;
 
 
+// uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
+//   // Convert from 8-bit (0–255) to 5-bit (0–31)
+//   uint16_t red = (r >> 3) & 0x1F;
+//   uint16_t green = (g >> 3) & 0x1F;
+//   uint16_t blue = (b >> 3) & 0x1F;
+//   // Pack: red in bits 14-10, green in bits 9-5, blue in bits 4-0.
+//   //return (red << 10) | (green << 5) | blue;
+//   return (red) | (green << 5) | (blue << 10);
+// }
 uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
-  // Convert from 8-bit (0–255) to 5-bit (0–31)
-  uint16_t red = (r >> 3) & 0x1F;
-  uint16_t green = (g >> 3) & 0x1F;
-  uint16_t blue = (b >> 3) & 0x1F;
-  // Pack: red in bits 14-10, green in bits 9-5, blue in bits 4-0.
-  //return (red << 10) | (green << 5) | blue;
-  return (red) | (green << 5) | (blue << 10);
+  uint16_t red = (r >> 3) & 0x1F;    // 5-bit
+  uint16_t green = (g >> 3) & 0x1F;  // 5-bit
+  uint16_t blue = (b >> 3) & 0x1F;   // 5-bit
+  // Pack: [B4..B0] -> bits 15–11, [G4..G0] -> bits 10–6, [R4..R0] -> bits 4–0.
+  uint16_t output = mapColor((red) | (green << 6) | (blue << 11));
+  // return (red) |         // bits 4–0  (GP0–GP4)
+  //        (green << 6) |  // bits 10–6 (GP6–GP10, note bit5 skipped)
+  //        (blue << 11);   // bits 15–11 (GP11–GP15)
+  return output;
 }
 
 uint16_t mapColor(uint16_t color) {
   // Extract logical channels.
-  uint8_t red   = color & 0x1F;
+  uint8_t red = color & 0x1F;
   uint8_t green = (color >> 5) & 0x1F;
-  uint8_t blue  = (color >> 10) & 0x1F;
-  
+  uint8_t blue = (color >> 10) & 0x1F;
+
   uint16_t out = 0;
   // Map red (logical red in bits 0–4) to physical GPIO0–4.
   for (int i = 0; i < 5; i++) {
@@ -159,12 +172,13 @@ uint16_t mapColor(uint16_t color) {
 uint16_t dma_chan = dma_claim_unused_channel(true);
 uint16_t dma_cb = dma_claim_unused_channel(true);
 
-uint32_t SaveDividerState;       // saved integer divider state
+//uint32_t SaveDividerState;       // saved integer divider state
 volatile uint32_t currentFrame;  // frame counter
 
 volatile int currentScanLine;  // current processed scan line 0... (next displayed scan line)
 void startDMAForLine(unsigned char line) {
-  volatile unsigned char* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
+  //volatile unsigned char* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
+  volatile uint16_t* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
   dma_channel_set_read_addr(dma_chan, line_ptr, true);
 }
 
@@ -172,7 +186,7 @@ void startDMAForLine(unsigned char line) {
 void __not_in_flash_func(QVgaLine)() {
   // Clear the interrupt request for DMA control channel
   dma_hw->ints0 = (1u << dma_chan);
-  startDMAForLine(currentScanLine);
+  // startDMAForLine(currentScanLine);
   // update DMA control channel and run it
 
   // save integer divider state
@@ -237,14 +251,14 @@ void initVGA() {
     dma_chan,             // Channel to be configured
     &c0,                  // The configuration we just created
     &pio->txf[rgb15_sm],  // write address (RGB PIO TX FIFO)
-    vga_data_array,       // The initial read address (pixel color array)
+    &vga_data_array,      // The initial read address (pixel color array)
     DMATXCOUNT,           // Number of transfers; in this case each is 1 byte.
     false                 // Don't start immediately.
   );
 
   // Channel One (reconfigures the first channel)
   dma_channel_config c1 = dma_channel_get_default_config(dma_cb);  // default configs
-  channel_config_set_transfer_data_size(&c1, DMA_SIZE_32);         // 32-bit txfers
+  channel_config_set_transfer_data_size(&c1, DMA_SIZE_32);         // 32-bit txfers. 32x5
   channel_config_set_read_increment(&c1, false);                   // no read incrementing
   channel_config_set_write_increment(&c1, false);                  // no write incrementing
   channel_config_set_chain_to(&c1, dma_chan);                      // chain to other channel
@@ -254,7 +268,7 @@ void initVGA() {
     &c1,                              // The configuration we just created
     &dma_hw->ch[dma_chan].read_addr,  // Write address (channel 0 read address)
     &address_pointer_array,           // Read address (POINTER TO AN ADDRESS)
-    TXCOUNT,                          // Number of transfers, in this case each is 4 byte
+    1,                                // Number of transfers, in this case each is 4 byte
     false                             // Don't start immediately.
   );
 
@@ -290,20 +304,6 @@ void initVGA() {
 }
 
 
-
-void fillScreen(uint16_t color) {
-  for (int i = 0; i < TXCOUNT; i++) {
-    //  vga_data_array[i] = color;
-    vga_data_array_next[i] = color;
-    //drawPixel(i, 0, color);
-  }
-  for (int i = 0; i < TXCOUNT; i++) {
-
-    // vga_data_array[i] = color;
-    vga_data_array_next[i] = color;
-    //drawPixel(0, i, color);
-  }
-}
 // A function for drawing a pixel with a specified color.
 // Note that because information is passed to the PIO state machines through
 // a DMA channel, we only need to modify the contents of the array and the
@@ -324,17 +324,6 @@ void drawPixel(int x, int y, uint16_t color) {
   // }
 }
 
-void clearScreen() {
-  for (int i = 0; i < TXCOUNT; i++) {
-    vga_data_array_next[i] = 0;
-  }
-}
-
-void nextFrame() {
-  for (uint16_t i = 0; i < TXCOUNT; i++) {
-    vga_data_array[i] = vga_data_array_next[i];
-  }
-}
 
 //TIMER
 const byte frameRate = 20;
@@ -343,8 +332,11 @@ unsigned long previousFrameTime = 0;                     // Tiempo previo para e
 unsigned long currentTime;
 
 void setup() {
-  initVGA();
   Serial.begin(115200);
+  delay(2000);
+  initVGA();
+  debug.println("Started");
+  delay(5000);
   // initTunnel();
   // Test drawing routines.
   // Fill the screen with blue.
@@ -354,46 +346,120 @@ void setup() {
   // uint16_t red = createColor(255, 0, 0);
   //    drawPixel(100, 100, red);
 }
-
+int cycle = 0;
+int cycle_max = 4;
+int cycle_period = 3000;
+unsigned long cycle_last = 0;
+int counter;
+int counter2;
 void loop() {
   //CODE HERE RUNS AT CPU SPEED
-
   currentTime = millis();  // Obtener el tiempo actual
   // Ejecutar draw() una sola vez al comienzo de cada ciclo
   if (currentTime - previousFrameTime >= FRAME_INTERVAL) {
     previousFrameTime = currentTime;
-
+    //    debug.println("OK");
     draw();
   }
+  if (millis() > cycle_last + cycle_period) {
+    // debug.println("Hello");
+    cycle_last = millis();
+    cycle++;
+    //  cycle=4;
+    if (cycle > cycle_max) {
+      cycle = 1;
+    }
+    uint16_t conv_color;
+    switch (cycle) {
+      case 1:
+        conv_color = createColor(255, 0, 0);
+        debug.println("RED!");
+        break;
+      case 2:
+        conv_color = createColor(0, 255, 0);
+        debug.println("GREEN!");
+        break;
+      case 3:
+        conv_color = createColor(0, 0, 255);
+        debug.println("BLUE!");
+        break;
+      case 4:
+        conv_color = createColor(255, 255, 255);
+        debug.println("ALL!");
+        break;
+    }
+    debug.print(conv_color);
+    debug.print("-->");
+    testcolor = mapColor(conv_color);
+    debug.println(testcolor);
+  }
+  //     debug.println("running");
 }
-bool programa = 0;
+  bool programa = 0;
+
+
+void clearScreen() {
+  // for (int i = 0; i < TXCOUNT; i++) {
+  //   vga_data_array_next[i] = 0;
+  // }
+}
+
+void nextFrame() {
+  for (int i = 0; i < TXCOUNT; i++) {
+    vga_data_array[i] = vga_data_array_next[i];
+  }
+}
+
 void draw() {
   //CODE HERE RUNS AT FRAMERATE
   if (currentTime % 5000 <= 50) {
     programa = !programa;  //changes the example program
+                           // debug.println("....");
   }
 
-  if (programa == 1) {
-    clearScreen();
-    testcolor = createColor(0, 0, 255);
-        testcolor = mapColor(testcolor);
-    debug.println("BLUE");
-    //  tunnel();           //example
-  } else if (programa == 0) {
-    clearScreen();
-    testcolor = createColor(0, 255, 0);
-    testcolor = mapColor(testcolor);
-    debug.println("GREEN");
-    //    uint16_t green = createColor(0, 255, 0);
-    //   asciiHorizontal();
-    //example
-  }
+  // if (programa == 1) {
+  //   testcolor = createColor(0, 0, 255);
+  //   testcolor = mapColor(testcolor);
+  //   debug.println("BLUE");
+  //   //  tunnel();           //example
+  // } else if (programa == 0) {
+  //   testcolor = createColor(0, 255, 0);
+  //   testcolor = mapColor(testcolor);
+  //   debug.println("GREEN");
+  //   //    uint16_t green = createColor(0, 255, 0);
+  //   //   asciiHorizontal();
+  //   //example
+  // }
   //  escribir();         //example
-  fillScreen(testcolor);
+  //  debug.println("ar");
+
+  //vga_data_array[i] = color;
+  // vga_data_array_next[i] = color;
+
+  //}
+ fillScreen(testcolor);
+
   nextFrame();    //copies temporary buffer to the vga output buffer
+                  //      debug.println("beer");
   clearScreen();  //deletes temporary buffer, then next frame will be black
+
+  //    debug.println("keeer");
 }
 
+
+void fillScreen(uint16_t color) {
+  for (int i = 0; i < TXCOUNT; i++) {
+    //vga_data_array[i] = color;
+    vga_data_array_next[i] = color;
+    //drawPixel(i, 0, color);
+  }
+  // for (int i = 0; i < TXCOUNT; i++) {
+
+  //   // vga_data_array[i] = color;
+  //   vga_data_array_next[i] = color;
+  //   //drawPixel(0, i, color);
+  // }
+}
 // void escribir() {
 //   setTextColor2(RED, BLUE);
 //   setTextCursor(100, 100);
