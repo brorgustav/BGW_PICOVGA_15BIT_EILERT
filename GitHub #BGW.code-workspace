@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": ".."
+		},
+		{
+			"name": "arduino_pico_core",
+			"path": "../../../../../Documents/PlatformIO/Projects/arduino_pico_core"
+		}
+	],
+	"settings": {}
+}

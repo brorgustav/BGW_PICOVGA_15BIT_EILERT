@@ -29,9 +29,10 @@
 #include "pico/stdlib.h"
 #include "hardware/pio.h"
 #include "hardware/dma.h"
-#define H_ACTIVE 655      // (active + frontporch - 1) - one cycle delay for mov
+#define H_ACTIVE 655      // (active + frontporch - 1) - one red_counter delay for mov
 #define V_ACTIVE 479      // (active - 1)
 #define rgb15_ACTIVE 319  // (horizontal active)/2 - 1
+//#define rgb15_ACTIVE 639  // (horizontal active)/2 - 1
 // Ensure the same resolution definitions as in vga_graphics.h.
 // #define SCREEN_WIDTH 640
 // #define SCREEN_HEIGHT 240  // Logical height (output is doubled to 480)
@@ -44,16 +45,20 @@ const uint16_t SCREEN_HEIGHT = 240;  // Logical height (output is doubled to 480
 #include "vsync.pio.h"
 #include "rgb.pio.h"
 // Header file
-#include "vga_graphics.h"
+//#include "vga_graphics.h"
 // Font file
-#include "glcdfont.h"
+//#include "glcdfont.h"
 
 // VGA timing constants
-
+#define RGB15(red, green, blue)  ( ((red)   & 0x1F)        | \
+                                    (((green) & 0x1F) << 6)   | \
+                                    (((blue)  & 0x1F) << 11) )
 
 // Length of the pixel array, and number of DMA transfers
 const int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
 const int TXCOUNT = pixels / 2;  // Total pixels / 2. The total size of the buffer
+//const int TXCOUNT = pixels;  // Total pixels / 2. The total size of the buffer
+//const int DMATXCOUNT = SCREEN_WIDTH;
 const int DMATXCOUNT = SCREEN_WIDTH / 2;
 const int QVGALastLine = 240;  //La cantidad de lineas de los gráficos. Se usa para pasar la info al PIO (si se cambia se mueve la imagen)
 
@@ -64,6 +69,7 @@ const int QVGALastLine = 240;  //La cantidad de lineas de los gráficos. Se usa 
 uint16_t vga_data_array[TXCOUNT];
 volatile uint16_t* address_pointer_array = &vga_data_array[0];
 uint16_t vga_data_array_next[TXCOUNT];
+
 // address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
 //volatile uint16_t* address_pointer_array[TXCOUNT];
 //extern uint16_t vga_data_array_next[TXCOUNT];
@@ -74,6 +80,14 @@ uint16_t vga_data_array_next[TXCOUNT];
 
 // NEW: Pin assignments for Pimoroni Pico VGA Demo Base board (15-bit color)
 // Red channel: 5 bits on pins 0, 1, 2, 3, 4
+
+//TIMER
+const byte frameRate = 20;
+const unsigned long FRAME_INTERVAL = 10000 / frameRate;  // Intervalo de tiempo para cada frame
+unsigned long previousFrameTime = 0;                     // Tiempo previo para el inicio de cada ciclo
+unsigned long currentTime;
+
+
 #define VGA_RED_PIN0 0
 #define VGA_RED_PIN1 1
 #define VGA_RED_PIN2 2
@@ -120,7 +134,7 @@ uint16_t vga_data_array_next[TXCOUNT];
 // For drawing uint16_tacters
 unsigned short cursor_y, cursor_x, textsize;
 uint16_t textcolor, textbgcolor, wrap;
-uint16_t testcolor = 0;
+uint16_t test_color = 0;
 
 
 // uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
@@ -132,16 +146,22 @@ uint16_t testcolor = 0;
 //   //return (red << 10) | (green << 5) | blue;
 //   return (red) | (green << 5) | (blue << 10);
 // }
+
+
+
+
+
 uint16_t createColor(uint8_t r, uint8_t g, uint8_t b) {
   uint16_t red = (r >> 3) & 0x1F;    // 5-bit
   uint16_t green = (g >> 3) & 0x1F;  // 5-bit
   uint16_t blue = (b >> 3) & 0x1F;   // 5-bit
-  // Pack: [B4..B0] -> bits 15–11, [G4..G0] -> bits 10–6, [R4..R0] -> bits 4–0.
-  uint16_t output = mapColor((red) | (green << 6) | (blue << 11));
-  // return (red) |         // bits 4–0  (GP0–GP4)
-  //        (green << 6) |  // bits 10–6 (GP6–GP10, note bit5 skipped)
-  //        (blue << 11);   // bits 15–11 (GP11–GP15)
-  return output;
+                                     // Pack: [B4..B0] -> bits 15–11, [G4..G0] -> bits 10–6, [R4..R0] -> bits 4–0.
+                                     //uint16_t output = mapColor((red) | (green << 6) | (blue << 11));
+                                     //uint16_t output = ((red) | (green << 6) | (blue << 11));
+                                     // return output;
+  return (red) |                     // bits 4–0  (GP0–GP4)
+         (green << 6) |              // bits 10–6 (GP6–GP10, note bit5 skipped)
+         (blue << 11);               // bits 15–11 (GP11–GP15)
 }
 
 uint16_t mapColor(uint16_t color) {
@@ -149,7 +169,6 @@ uint16_t mapColor(uint16_t color) {
   uint8_t red = color & 0x1F;
   uint8_t green = (color >> 5) & 0x1F;
   uint8_t blue = (color >> 10) & 0x1F;
-
   uint16_t out = 0;
   // Map red (logical red in bits 0–4) to physical GPIO0–4.
   for (int i = 0; i < 5; i++) {
@@ -168,19 +187,19 @@ uint16_t mapColor(uint16_t color) {
   }
   return out;
 }
+
 // DMA channels - 0 sends color data, 1 reconfigures and restarts 0
 uint16_t dma_chan = dma_claim_unused_channel(true);
 uint16_t dma_cb = dma_claim_unused_channel(true);
 
 //uint32_t SaveDividerState;       // saved integer divider state
 volatile uint32_t currentFrame;  // frame counter
-
-volatile int currentScanLine;  // current processed scan line 0... (next displayed scan line)
-void startDMAForLine(unsigned char line) {
-  //volatile unsigned char* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
-  volatile uint16_t* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
-  dma_channel_set_read_addr(dma_chan, line_ptr, true);
-}
+volatile int currentScanLine;    // current processed scan line 0... (next displayed scan line)
+// void startDMAForLine(unsigned char line) {
+//   //volatile unsigned char* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
+//   volatile uint16_t* line_ptr = &vga_data_array[(line / 2) * SCREEN_WIDTH];
+//   dma_channel_set_read_addr(dma_chan, line_ptr, true);
+// }
 
 // QVGA DMA handler - called on end of every scanline
 void __not_in_flash_func(QVgaLine)() {
@@ -198,8 +217,11 @@ void __not_in_flash_func(QVgaLine)() {
     currentFrame++;                        // increment frame counter
     currentScanLine = 0;                   // restart scanline
   }
-}
 
+
+  address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
+}
+#include "do_stuff.h"
 
 // restore integer divider state
 //hw_divider_restore_state(&SaveDividerState);
@@ -234,19 +256,27 @@ void initVGA() {
   hsync_program_init(pio, hsync_sm, hsync_offset, VGA_HSYNC_PIN);
   vsync_program_init(pio, vsync_sm, vsync_offset, VGA_VSYNC_PIN);
   rgb15_program_init(pio, rgb15_sm, rgb15_offset, VGA_RED_PIN0);
-
   /////////////////////////////////////////////////////////////////////////////////////////////////////
-  // ============================== PIO DMA Channels =================================================
+  // ============================================= CONFIG =============================================
   /////////////////////////////////////////////////////////////////////////////////////////////////////
-
   // Channel Zero (sends color data to PIO VGA machine)
   dma_channel_config c0 = dma_channel_get_default_config(dma_chan);  // default configs
-  channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);           // 8-bit txfers.
-  channel_config_set_read_increment(&c0, true);                      // yes read incrementing
-  channel_config_set_write_increment(&c0, false);                    // no write incrementing
-  channel_config_set_dreq(&c0, DREQ_PIO0_TX2);                       // DREQ_PIO0_TX2 pacing (FIFO)
-  channel_config_set_chain_to(&c0, dma_cb);                          // chain to other channel
-
+  //channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);           // 8-bit txfers.
+  channel_config_set_transfer_data_size(&c0, DMA_SIZE_8);  // 8-bit txfers.
+  channel_config_set_read_increment(&c0, true);            // yes read incrementing
+  channel_config_set_write_increment(&c0, false);          // no write incrementing
+  channel_config_set_dreq(&c0, DREQ_PIO0_TX2);             // DREQ_PIO0_TX2 pacing (FIFO)
+  channel_config_set_chain_to(&c0, dma_cb);                // chain to other channel
+    /////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Channel One (reconfigures the first channel)
+  dma_channel_config c1 = dma_channel_get_default_config(dma_cb);  // default configs
+  channel_config_set_transfer_data_size(&c1, DMA_SIZE_32);         // 32-bit txfers. 32x5
+  channel_config_set_read_increment(&c1, false);                   // no read incrementing
+  channel_config_set_write_increment(&c1, false);                  // no write incrementing
+  channel_config_set_chain_to(&c1, dma_chan);                      // chain to other channel
+  /////////////////////////////////////////////////////////////////////////////////////////////////////
+  // ============================================= CONFIG =============================================
+  /////////////////////////////////////////////////////////////////////////////////////////////////////
   dma_channel_configure(
     dma_chan,             // Channel to be configured
     &c0,                  // The configuration we just created
@@ -255,23 +285,16 @@ void initVGA() {
     DMATXCOUNT,           // Number of transfers; in this case each is 1 byte.
     false                 // Don't start immediately.
   );
-
-  // Channel One (reconfigures the first channel)
-  dma_channel_config c1 = dma_channel_get_default_config(dma_cb);  // default configs
-  channel_config_set_transfer_data_size(&c1, DMA_SIZE_32);         // 32-bit txfers. 32x5
-  channel_config_set_read_increment(&c1, false);                   // no read incrementing
-  channel_config_set_write_increment(&c1, false);                  // no write incrementing
-  channel_config_set_chain_to(&c1, dma_chan);                      // chain to other channel
-
+  /////////////////////////////////////////////////////////////////////////////////////////////////////
   dma_channel_configure(
     dma_cb,                           // Channel to be configured
     &c1,                              // The configuration we just created
     &dma_hw->ch[dma_chan].read_addr,  // Write address (channel 0 read address)
     &address_pointer_array,           // Read address (POINTER TO AN ADDRESS)
-    1,                                // Number of transfers, in this case each is 4 byte
+    4,                                // Number of transfers, in this case each is 4 byte
     false                             // Don't start immediately.
   );
-
+  /////////////////////////////////////////////////////////////////////////////////////////////////////
   // enable DMA channel IRQ0
   dma_channel_set_irq0_enabled(dma_chan, true);
   // set DMA IRQ handler
@@ -288,22 +311,17 @@ void initVGA() {
   pio_sm_put_blocking(pio, hsync_sm, H_ACTIVE);
   pio_sm_put_blocking(pio, vsync_sm, V_ACTIVE);
   pio_sm_put_blocking(pio, rgb15_sm, rgb15_ACTIVE);
-
-
   // Start the two pio machine IN SYNC
   // Note that the RGB state machine is running at full speed,
   // so synchronization doesn't matter for that one. But, we'll
   // start them all simultaneously anyway.
   pio_enable_sm_mask_in_sync(pio, ((1u << hsync_sm) | (1u << vsync_sm) | (1u << rgb15_sm)));
-
   // Start DMA channel 0. Once started, the contents of the pixel color array
   // will be continously DMA's to the PIO machines that are driving the screen.
   // To change the contents of the screen, we need only change the contents
   // of that array.
   dma_start_channel_mask((1u << dma_chan));
 }
-
-
 // A function for drawing a pixel with a specified color.
 // Note that because information is passed to the PIO state machines through
 // a DMA channel, we only need to modify the contents of the array and the
@@ -325,17 +343,12 @@ void drawPixel(int x, int y, uint16_t color) {
 }
 
 
-//TIMER
-const byte frameRate = 20;
-const unsigned long FRAME_INTERVAL = 10000 / frameRate;  // Intervalo de tiempo para cada frame
-unsigned long previousFrameTime = 0;                     // Tiempo previo para el inicio de cada ciclo
-unsigned long currentTime;
 
 void setup() {
-  Serial.begin(115200);
+  //x debug.begin(115200);
   delay(2000);
   initVGA();
-  debug.println("Started");
+  //x debug.println("Started");
   delay(5000);
   // initTunnel();
   // Test drawing routines.
@@ -346,126 +359,112 @@ void setup() {
   // uint16_t red = createColor(255, 0, 0);
   //    drawPixel(100, 100, red);
 }
-int cycle = 0;
-int cycle_max = 4;
-int cycle_period = 3000;
-unsigned long cycle_last = 0;
-int counter;
+int counter_program = 1;
+int red_counter = 0;
+int green_counter = 0;
+int blue_counter = 0;
+int color_max = 255;
+bool red_dir = 1;
+bool green_dir = 1;
+bool blue_dir = 1;
+int counter_program_max = 5;
+int counter_program_min = 1;
+// int counter_program_period = 3000;
+int counter_program_period = 25;
+unsigned long counter_program_last = 0;
+int counter1;
 int counter2;
+uint16_t conv_color;
 void loop() {
   //CODE HERE RUNS AT CPU SPEED
   currentTime = millis();  // Obtener el tiempo actual
   // Ejecutar draw() una sola vez al comienzo de cada ciclo
   if (currentTime - previousFrameTime >= FRAME_INTERVAL) {
     previousFrameTime = currentTime;
-    //    debug.println("OK");
+    //    //x debug.println("OK");
     draw();
   }
-  if (millis() > cycle_last + cycle_period) {
-    // debug.println("Hello");
-    cycle_last = millis();
-    cycle++;
-    //  cycle=4;
-    if (cycle > cycle_max) {
-      cycle = 1;
+  if (millis() > counter_program_last + counter_program_period) {
+    // //x debug.println("Hello");
+    counter_program_last = millis();
+    // counter_program++;
+    //  red_counter=4;
+    if (counter1 > counter_program_max) {
+      counter_program = 1;
     }
-    uint16_t conv_color;
-    switch (cycle) {
+    switch (counter_program) {
       case 1:
-        conv_color = createColor(255, 0, 0);
-        debug.println("RED!");
+        conv_color = createColor(0, 255, 0);
+        ////x debug.print("RED! --- ");
+        ////x debug.print(red_counter);
+        ////x debug.print(" --- ");
+        if (red_counter >= color_max) {
+          red_counter = 0;
+          counter_program++;
+        } else {
+          red_counter++;
+        }
         break;
       case 2:
-        conv_color = createColor(0, 255, 0);
-        debug.println("GREEN!");
+        //  conv_color = createColor(0, 255, 0);
+        ////x debug.print("GREEN! --- ");
+        ////x debug.print(green_counter);
+        ////x debug.print(" --- ");
+        if (green_counter >= color_max) {
+          //red_counter=0;
+          green_counter = 0;
+          counter_program++;
+        } else {
+          green_counter++;
+        }
         break;
       case 3:
-        conv_color = createColor(0, 0, 255);
-        debug.println("BLUE!");
+        // conv_color = createColor(0, 0, 255);
+        ////x debug.print("BLUE! --- ");
+        ////x debug.print(blue_counter);
+        ////x debug.print(" --- ");
+        if (blue_counter >= color_max) {
+          blue_counter = 0;
+          counter_program++;
+        } else {
+          blue_counter++;
+        }
         break;
       case 4:
-        conv_color = createColor(255, 255, 255);
-        debug.println("ALL!");
+        blue_counter++;
+        red_counter++;
+        green_counter++;
+        if (blue_counter >= color_max) {
+          blue_counter = 0;
+          red_counter = 0;
+          green_counter = 0;
+          counter_program++;
+        }
+        //  conv_color = createColor(255, 255, 255);
+        ////x debug.print("ALL! --- ");
+        break;
+
+      case 5:
+        conv_color = createColor(0, 0, 0);
+        //x debug.print("NONE! --- ");
         break;
     }
-    debug.print(conv_color);
-    debug.print("-->");
-    testcolor = mapColor(conv_color);
-    debug.println(testcolor);
+    conv_color = createColor(red_counter, green_counter, blue_counter);
+    
+    
+    //test_color=RGB15(red_counter, green_counter, blue_counter);
+    
+    //x debug.print("R:");
+    //x debug.print(red_counter);
+    //x debug.print("     G:");
+    //x debug.print(green_counter);
+    //x debug.print("     B:");
+    //x debug.println(blue_counter);
+    //x debug.print(conv_color);
+    //x debug.print("->");
+ test_color = conv_color;
+test_color = mapColor(conv_color);
+    //x debug.println(test_color);
   }
-  //     debug.println("running");
+  //     //x debug.println("running");
 }
-  bool programa = 0;
-
-
-void clearScreen() {
-  // for (int i = 0; i < TXCOUNT; i++) {
-  //   vga_data_array_next[i] = 0;
-  // }
-}
-
-void nextFrame() {
-  for (int i = 0; i < TXCOUNT; i++) {
-    vga_data_array[i] = vga_data_array_next[i];
-  }
-}
-
-void draw() {
-  //CODE HERE RUNS AT FRAMERATE
-  if (currentTime % 5000 <= 50) {
-    programa = !programa;  //changes the example program
-                           // debug.println("....");
-  }
-
-  // if (programa == 1) {
-  //   testcolor = createColor(0, 0, 255);
-  //   testcolor = mapColor(testcolor);
-  //   debug.println("BLUE");
-  //   //  tunnel();           //example
-  // } else if (programa == 0) {
-  //   testcolor = createColor(0, 255, 0);
-  //   testcolor = mapColor(testcolor);
-  //   debug.println("GREEN");
-  //   //    uint16_t green = createColor(0, 255, 0);
-  //   //   asciiHorizontal();
-  //   //example
-  // }
-  //  escribir();         //example
-  //  debug.println("ar");
-
-  //vga_data_array[i] = color;
-  // vga_data_array_next[i] = color;
-
-  //}
- fillScreen(testcolor);
-
-  nextFrame();    //copies temporary buffer to the vga output buffer
-                  //      debug.println("beer");
-  clearScreen();  //deletes temporary buffer, then next frame will be black
-
-  //    debug.println("keeer");
-}
-
-
-void fillScreen(uint16_t color) {
-  for (int i = 0; i < TXCOUNT; i++) {
-    //vga_data_array[i] = color;
-    vga_data_array_next[i] = color;
-    //drawPixel(i, 0, color);
-  }
-  // for (int i = 0; i < TXCOUNT; i++) {
-
-  //   // vga_data_array[i] = color;
-  //   vga_data_array_next[i] = color;
-  //   //drawPixel(0, i, color);
-  // }
-}
-// void escribir() {
-//   setTextColor2(RED, BLUE);
-//   setTextCursor(100, 100);
-//   setTextSize(2);
-
-//   char statusTemp[4];
-//   itoa(currentFrame, statusTemp, 10);
-//   writeString(statusTemp);
-// }
