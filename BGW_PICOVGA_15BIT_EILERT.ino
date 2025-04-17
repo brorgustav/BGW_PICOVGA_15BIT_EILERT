@@ -50,9 +50,7 @@ const uint16_t SCREEN_HEIGHT = 240;  // Logical height (output is doubled to 480
 //#include "glcdfont.h"
 
 // VGA timing constants
-#define RGB15(red, green, blue)  ( ((red)   & 0x1F)        | \
-                                    (((green) & 0x1F) << 6)   | \
-                                    (((blue)  & 0x1F) << 11) )
+#define RGB15(red, green, blue) (((red)&0x1F) | (((green)&0x1F) << 6) | (((blue)&0x1F) << 11))
 
 // Length of the pixel array, and number of DMA transfers
 const int pixels = SCREEN_WIDTH * SCREEN_HEIGHT;
@@ -261,12 +259,12 @@ void initVGA() {
   /////////////////////////////////////////////////////////////////////////////////////////////////////
   // Channel Zero (sends color data to PIO VGA machine)
   dma_channel_config c0 = dma_channel_get_default_config(dma_chan);  // default configs
-  //channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);           // 8-bit txfers.
-  channel_config_set_transfer_data_size(&c0, DMA_SIZE_8);  // 8-bit txfers.
-  channel_config_set_read_increment(&c0, true);            // yes read incrementing
-  channel_config_set_write_increment(&c0, false);          // no write incrementing
-  channel_config_set_dreq(&c0, DREQ_PIO0_TX2);             // DREQ_PIO0_TX2 pacing (FIFO)
-  channel_config_set_chain_to(&c0, dma_cb);                // chain to other channel
+  channel_config_set_transfer_data_size(&c0, DMA_SIZE_16);           // 8-bit txfers.
+  // channel_config_set_transfer_data_size(&c0, DMA_SIZE_8);  // 8-bit txfers.
+  channel_config_set_read_increment(&c0, true);    // yes read incrementing
+  channel_config_set_write_increment(&c0, false);  // no write incrementing
+  channel_config_set_dreq(&c0, DREQ_PIO0_TX2);     // DREQ_PIO0_TX2 pacing (FIFO)
+  channel_config_set_chain_to(&c0, dma_cb);        // chain to other channel
     /////////////////////////////////////////////////////////////////////////////////////////////////////
   // Channel One (reconfigures the first channel)
   dma_channel_config c1 = dma_channel_get_default_config(dma_cb);  // default configs
@@ -341,14 +339,31 @@ void drawPixel(int x, int y, uint16_t color) {
   //   vga_data_array_next[pixel >> 1] = (vga_data_array_next[pixel >> 1] & BOTTOMMASK) | (color);
   // }
 }
+uint16_t e_to_s(uint8_t r, uint8_t g, uint8_t b) {
+    // Convert 8-bit channels to RGB565
+    uint16_t rgb565 = ((r & 0xF8) << 8) |
+                      ((g & 0xFC) << 3) |
+                      ((b & 0xF8) >> 3);
+    return rgb565;
+}
 
+// Convert a 16-bit RGB565 color into a 16-bit bit pattern for GPIO0–15 output
+uint16_t s_to_s(uint16_t rgb565) {
+    uint8_t r = (rgb565 >> 11) & 0x1F;  // R5
+    uint8_t g = (rgb565 >> 5) & 0x3F;   // G6
+    uint8_t b = rgb565 & 0x1F;          // B5
 
+    g = (g + 1) >> 1; // Convert G6 → G5 with rounding
 
+    return (r)           // Red → GPIO 0–4
+         | (g << 6)      // Green → GPIO 6–10 (bit 5 skipped!)
+         | (b << 11);    // Blue → GPIO 11–15
+}
 void setup() {
-  //x debug.begin(115200);
+  debug.begin(115200);
   delay(2000);
   initVGA();
-  //x debug.println("Started");
+  debug.println("Started");
   delay(5000);
   // initTunnel();
   // Test drawing routines.
@@ -359,7 +374,7 @@ void setup() {
   // uint16_t red = createColor(255, 0, 0);
   //    drawPixel(100, 100, red);
 }
-int counter_program = 1;
+int program_counter = 1;
 int red_counter = 0;
 int green_counter = 0;
 int blue_counter = 0;
@@ -367,104 +382,178 @@ int color_max = 255;
 bool red_dir = 1;
 bool green_dir = 1;
 bool blue_dir = 1;
-int counter_program_max = 5;
-int counter_program_min = 1;
-// int counter_program_period = 3000;
-int counter_program_period = 25;
-unsigned long counter_program_last = 0;
+int program_counter_max = 4;
+int program_counter_min = 1;
+// int program_counter_period = 2000;
+int program_counter_period = 50;
+unsigned long program_counter_last = 0;
 int counter1;
 int counter2;
 uint16_t conv_color;
+int bootsel_count = 0;
+void rgb_change() {
+  if (millis() > program_counter_last + program_counter_period) {
+    // debug.println("Hello");
+    program_counter_last = millis();
+    // program_counter++;
+    //  red_counter=4;
+    if (program_counter > program_counter_max | program_counter == 0) {
+      program_counter = 1;
+    }
+    // if (program_counter == 0) {
+    //   program_counter = 1;
+    // }
+    switch (program_counter) {
+      case 1:
+        if (red_counter >= color_max | red_counter < 0) {
+          // red_counter = 0;
+          red_dir = !red_dir;
+          // program_counter++;
+        }
+        if (red_dir == 1) {
+          red_counter++;
+        }
+        if (red_dir == 0) {
+          red_counter--;
+        }
+        break;
+      case 2:
+        if (green_counter >= color_max | green_counter < 0) {
+          // green_counter = 0;
+          green_dir = !green_dir;
+          // program_counter++;
+        }
+        if (green_dir == 1) {
+          green_counter++;
+        }
+        if (green_dir == 0) {
+          green_counter--;
+        }
+        break;
+      case 3:
+
+        if (blue_counter >= color_max | blue_counter < 0) {
+          // blue_counter = 0;
+          blue_dir = !blue_dir;
+          // program_counter++;
+        }
+        if (blue_dir == 1) {
+          blue_counter++;
+        }
+        if (blue_dir == 0) {
+          blue_counter--;
+        }
+        break;
+      case 4:
+
+        // blue_counter++;
+        // red_counter++;
+        // green_counter++;
+        // if (red_counter >= color_max | red_counter < 0) {
+        //   // red_counter = 0;
+        //   red_dir = !red_dir;
+        //   // program_counter++;
+        // }
+        // if (red_dir == 1) {
+        //   red_counter++;
+        // }
+        // if (red_dir == 0) {
+        //   red_counter--;
+        // }
+        // if (green_counter >= color_max | green_counter < 0) {
+        //   // green_counter = 0;
+        //   green_dir = !green_dir;
+        //   // program_counter++;
+        // }
+        // if (green_dir == 1) {
+        //   green_counter++;
+        // }
+        // if (green_dir == 0) {
+        //   green_counter--;
+        // }
+        // if (blue_counter >= color_max | blue_counter < 0) {
+        //   // blue_counter = 0;
+        //   blue_dir = !blue_dir;
+        //   // program_counter++;
+        // }
+        // if (blue_dir == 1) {
+        //   blue_counter++;
+        // }
+        // if (blue_dir == 0) {
+        //   blue_counter--;
+        // }
+        //  conv_color = createColor(255, 255, 255);
+        //debug.print("ALL! --- ");
+        break;
+      case 5:
+        //  conv_color = createColor(0, 0, 0);
+        program_counter = 1;
+        debug.print("SKIP! --- ");
+        break;
+    }
+       debug.print("PROGRAM: ");
+          debug.print(program_counter);
+    debug.print("     RED:");
+    debug.print(red_counter);
+    debug.print("     GREEN:");
+    debug.print(green_counter);
+    debug.print("     BLUE:");
+    debug.print(blue_counter);
+        debug.print("                COLORCODE: ");
+    debug.print(conv_color);
+    debug.print(" -> ");
+    //test_color = RGB15(red_counter, green_counter, blue_counter);
+    conv_color = createColor(red_counter, green_counter, blue_counter);
+    // test_color = conv_color;
+    test_color = mapColor(conv_color);
+    debug.println(test_color);
+  }
+}
+unsigned long bootsel_time_now = 0;
+unsigned long bootsel_time_prev;
+unsigned long bootsel_time_period_pause = 1200;  //how long you need to hold the bootsel button to execute function, 2000=3sec
+unsigned long bootsel_time_period_reset = 2400;  //how long you need to hold the bootsel button to execute function, 2000=3sec
 void loop() {
+  rgb_change();
+  if (BOOTSEL) {
+
+    program_counter++;
+    if (program_counter == 4) {
+      program_counter = 1;
+    }
+
+    // Serial.printf("\a\aYou pressed BOOTSEL %d times!\n", ++bootsel_count);
+    // Wait for BOOTSEL to be released
+    bootsel_time_prev = millis();
+    while (BOOTSEL) {
+      //  delay(1);
+      bootsel_time_now = millis();
+      if (program_counter != 4) {
+        if (bootsel_time_now > bootsel_time_prev + bootsel_time_period_pause) {  //count how long you hold the bootsel button
+          bootsel_time_prev = bootsel_time_now;
+          debug.println("you held bootsel for an amount of time...");
+          debug.println("PAUSE program..");
+          program_counter = 4;
+        }
+      }
+      if (bootsel_time_now > bootsel_time_prev + bootsel_time_period_reset) {  //count how long you hold the bootsel button
+        bootsel_time_prev = bootsel_time_now;
+        debug.println("you held bootsel for an amount of time...");
+        debug.println("reset the program counter and RGB counters...");
+        red_counter = 0;
+        green_counter = 0;
+        blue_counter = 0;
+        program_counter = 0;
+      }
+    }
+  }
   //CODE HERE RUNS AT CPU SPEED
   currentTime = millis();  // Obtener el tiempo actual
   // Ejecutar draw() una sola vez al comienzo de cada ciclo
   if (currentTime - previousFrameTime >= FRAME_INTERVAL) {
     previousFrameTime = currentTime;
-    //    //x debug.println("OK");
+    //    debug.println("OK");
     draw();
   }
-  if (millis() > counter_program_last + counter_program_period) {
-    // //x debug.println("Hello");
-    counter_program_last = millis();
-    // counter_program++;
-    //  red_counter=4;
-    if (counter1 > counter_program_max) {
-      counter_program = 1;
-    }
-    switch (counter_program) {
-      case 1:
-        conv_color = createColor(0, 255, 0);
-        ////x debug.print("RED! --- ");
-        ////x debug.print(red_counter);
-        ////x debug.print(" --- ");
-        if (red_counter >= color_max) {
-          red_counter = 0;
-          counter_program++;
-        } else {
-          red_counter++;
-        }
-        break;
-      case 2:
-        //  conv_color = createColor(0, 255, 0);
-        ////x debug.print("GREEN! --- ");
-        ////x debug.print(green_counter);
-        ////x debug.print(" --- ");
-        if (green_counter >= color_max) {
-          //red_counter=0;
-          green_counter = 0;
-          counter_program++;
-        } else {
-          green_counter++;
-        }
-        break;
-      case 3:
-        // conv_color = createColor(0, 0, 255);
-        ////x debug.print("BLUE! --- ");
-        ////x debug.print(blue_counter);
-        ////x debug.print(" --- ");
-        if (blue_counter >= color_max) {
-          blue_counter = 0;
-          counter_program++;
-        } else {
-          blue_counter++;
-        }
-        break;
-      case 4:
-        blue_counter++;
-        red_counter++;
-        green_counter++;
-        if (blue_counter >= color_max) {
-          blue_counter = 0;
-          red_counter = 0;
-          green_counter = 0;
-          counter_program++;
-        }
-        //  conv_color = createColor(255, 255, 255);
-        ////x debug.print("ALL! --- ");
-        break;
-
-      case 5:
-        conv_color = createColor(0, 0, 0);
-        //x debug.print("NONE! --- ");
-        break;
-    }
-    conv_color = createColor(red_counter, green_counter, blue_counter);
-    
-    
-    //test_color=RGB15(red_counter, green_counter, blue_counter);
-    
-    //x debug.print("R:");
-    //x debug.print(red_counter);
-    //x debug.print("     G:");
-    //x debug.print(green_counter);
-    //x debug.print("     B:");
-    //x debug.println(blue_counter);
-    //x debug.print(conv_color);
-    //x debug.print("->");
- test_color = conv_color;
-test_color = mapColor(conv_color);
-    //x debug.println(test_color);
-  }
-  //     //x debug.println("running");
+  //     debug.println("running");
 }

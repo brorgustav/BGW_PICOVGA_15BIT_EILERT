@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../../../../Github-libraries/pico-playground/scanvideo"
+		}
+	],
+	"settings": {}
+}

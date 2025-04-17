@@ -23,9 +23,9 @@ void fillScreen(uint16_t color) {
 // }
 
 void clearScreen() {
-  // for (int i = 0; i < TXCOUNT; i++) {
-  //   vga_data_array_next[i] = 0;
-  // }
+  for (int i = 0; i < TXCOUNT; i++) {
+    // vga_data_array_next[i] = 0;
+  }
 }
 
 void nextFrame() {
