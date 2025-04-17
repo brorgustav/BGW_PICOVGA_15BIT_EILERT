@@ -66,7 +66,13 @@ const int QVGALastLine = 240;  //La cantidad de lineas de los gráficos. Se usa 
 //extern uint16_t vga_data_array[TXCOUNT];
 uint16_t vga_data_array[TXCOUNT];
 volatile uint16_t* address_pointer_array = &vga_data_array[0];
+//uint16_t* address_pointer_array = &vga_data_array[0];
 uint16_t vga_data_array_next[TXCOUNT];
+
+
+// unsigned char vga_data_array[TXCOUNT];
+// volatile unsigned char* address_pointer_array = &vga_data_array[0];
+// unsigned char vga_data_array_next[TXCOUNT];
 
 // address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
 //volatile uint16_t* address_pointer_array[TXCOUNT];
@@ -217,7 +223,9 @@ void __not_in_flash_func(QVgaLine)() {
   }
 
 
+  //address_pointer_array = vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
   address_pointer_array = &vga_data_array[DMATXCOUNT * (currentScanLine + 1 >> 1)];
+ // address_pointer_array = vga_data_array;
 }
 #include "do_stuff.h"
 
@@ -289,7 +297,7 @@ void initVGA() {
     &c1,                              // The configuration we just created
     &dma_hw->ch[dma_chan].read_addr,  // Write address (channel 0 read address)
     &address_pointer_array,           // Read address (POINTER TO AN ADDRESS)
-    4,                                // Number of transfers, in this case each is 4 byte
+    1,                                // Number of transfers, in this case each is 4 byte
     false                             // Don't start immediately.
   );
   /////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -385,7 +393,7 @@ bool blue_dir = 1;
 int program_counter_max = 4;
 int program_counter_min = 1;
 // int program_counter_period = 2000;
-int program_counter_period = 50;
+int program_counter_period = 15;
 unsigned long program_counter_last = 0;
 int counter1;
 int counter2;
